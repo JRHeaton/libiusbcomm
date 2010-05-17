@@ -2,6 +2,6 @@
 
 rm -rf ./build
 git add *
-git commit -m $1
-git push
+git commit -m $@
+git push origin master
 echo Done

@@ -27,20 +27,51 @@ enum iUSBPID {
 };
 
 /*!
+ @enum iUSBRecoveryConnectionState
+ @field kUSBConnected - device is in a connected state
+ @field kUSBDisconnected - device is disconnected
+ */
+enum iUSBRecoveryConnectionState {
+	kUSBConnected = 0xA,
+	kUSBDisconnected = 0xB
+};
+
+/*!
  @typedef iUSBRecoveryDeviceTransferProgressCallback
  @param percentComplete - The percent of the transfer complete
 */
 typedef void (*iUSBRecoveryDeviceTransferProgressCallback)(Float32 percentComplete);
 
 /*!
+ @typedef iUSBRecoveryDeviceConnectionChangeCallback
+ @param device - The device whose state has changed
+ @param newConnectionState - The new state of the connection. See @enum iUSBRecoveryConnectionState
+ */
+typedef void (*iUSBRecoveryDeviceConnectionChangeCallback)(iUSBRecoveryDeviceRef device, uint8_t newConnectionState);
+
+/*!
+ @struct iUSBRecoveryDeviceNotificationContext
+ @field disconnectCallback - The callback that will be called when the device disconnects. Must be non-NULL
+ @field runLoop - Optional. The run loop to add the notification to. If NULL, will assume CFRunLoopGetCurrent()
+ @field runLoopMode - Optional. The run loop mode for the run loop to add notifications to. If NULL, 
+ will assume kCFRunLoopDefaultMode
+ */
+typedef struct {
+	iUSBRecoveryDeviceConnectionChangeCallback disconnectCallback;
+	CFRunLoopRef runLoop;
+	CFStringRef runLoopMode;
+} iUSBRecoveryDeviceNotificationContext;
+
+/*!
  @function iUSBRecoveryDeviceCreateWithPID
  Enumerates all connected devices, searching for one that has a matching idProduct value.
  @param pid - The idProduct value to compare while enumerating devices. 
  Note that the idVendor value will always be set to 0x5AC(Apple Inc.)
+ @param context - The optional notification context for disconnect notifications.
  @result If pid was matched with a device's idProduct field, an iUSBRecoveryDeviceRef object 
  will be returned. If no idProduct was matched, the result will be NULL.
  */
-iUSBRecoveryDeviceRef iUSBRecoveryDeviceCreateWithPID(uint16_t pid);
+iUSBRecoveryDeviceRef iUSBRecoveryDeviceCreate(uint16_t pid, iUSBRecoveryDeviceNotificationContext *context);
 
 /*!
  @function iUSBRecoveryDeviceRelease
@@ -102,9 +133,24 @@ Boolean iUSBRecoveryDeviceSendControlMessage(iUSBRecoveryDeviceRef device, UInt8
 /*!
  @function iUSBRecoveryDeviceIsInRecoveryMode
  Check if the given device is in recovery mode.
- @param device - The device to query the mode of
+ @param device - The device to query the mode of.
  @result A boolean value, stating whether the device is in recovery mode.
  */
 Boolean iUSBRecoveryDeviceIsInRecoveryMode(iUSBRecoveryDeviceRef device);
+
+/*!
+ @function iUSBRecoveryDeviceReboot
+ Reboot the device
+ @param device - The device to reboot.
+ */
+void iUSBRecoveryDeviceReboot(iUSBRecoveryDeviceRef device);
+
+/*!
+ @function iUSBRecoveryDeviceSetAutoBoot
+ Change whether the device boots into the OS regularly each boot.
+ @param device - The device to change the boot configuration of.
+ @param autoBoot - A boolean value, stating whether or not the device should boot into the OS.
+ */
+void iUSBRecoveryDeviceSetAutoBoot(iUSBRecoveryDeviceRef device, Boolean autoBoot);
 
 #endif /* IUSBCOMM_RECOVERY_H */

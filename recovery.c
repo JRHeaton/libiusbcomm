@@ -22,18 +22,20 @@ struct __iUSBRecoveryDevice {
 	IOUSBDeviceInterface **deviceHandle;
 	IOUSBInterfaceInterface **interfaceHandle;
 	UInt8 responsePipeRef;
-	CFStringRef name;
-	CFStringRef serialNumber;
+	CFDictionaryRef properties;
 	Boolean open;
+	iUSBRecoveryDeviceConnectionChangeCallback disconnectCallback;
+	IONotificationPortRef disconnectNPort;
 };
 
 #define RECOVERY_DEVICE_SIZE sizeof(struct __iUSBRecoveryDevice)
 #define HIDDEN __attribute__ ((visibility("hidden")))
 
 HIDDEN int deviceGetStatus(iUSBRecoveryDeviceRef device, int flag);
-HIDDEN Boolean deviceOpen(iUSBRecoveryDeviceRef device);
+HIDDEN Boolean deviceOpen(iUSBRecoveryDeviceRef device, CFMutableDictionaryRef matching);
+HIDDEN void deviceDisconnected(void *refCon, io_iterator_t iterator);
 
-iUSBRecoveryDeviceRef iUSBRecoveryDeviceCreateWithPID(uint16_t pid) {
+iUSBRecoveryDeviceRef iUSBRecoveryDeviceCreate(uint16_t pid, iUSBRecoveryDeviceNotificationContext *context) {
 	CFMutableDictionaryRef matching = IOServiceMatching(kIOUSBDeviceClassName);
 	if(matching == NULL) 
 		return NULL;
@@ -47,6 +49,8 @@ iUSBRecoveryDeviceRef iUSBRecoveryDeviceCreateWithPID(uint16_t pid) {
 	CFRelease(idVendor);
 	CFRelease(idProduct);
 	
+	CFRetain(matching);
+	
 	io_service_t usbService = IOServiceGetMatchingService(kIOMasterPortDefault, matching);
 	if(!usbService) 
 		return NULL;
@@ -55,9 +59,30 @@ iUSBRecoveryDeviceRef iUSBRecoveryDeviceCreateWithPID(uint16_t pid) {
 	newDevice->idProduct = pid;
 	newDevice->usbService = usbService;
 	
-	if(!deviceOpen(newDevice)) {
+	if(!deviceOpen(newDevice, matching)) {
 		free(newDevice);
 		return NULL;
+	}
+	
+	if(context != NULL) {
+		if(context->disconnectCallback != NULL) {
+			CFRunLoopSourceRef notifySource = IONotificationPortGetRunLoopSource(newDevice->disconnectNPort);
+			
+			newDevice->disconnectCallback = context->disconnectCallback;
+			if(context->runLoop != NULL) {
+				if(context->runLoopMode != NULL) {
+					CFRunLoopAddSource(context->runLoop, notifySource, context->runLoopMode);
+				} else {
+					CFRunLoopAddSource(context->runLoop, notifySource, kCFRunLoopDefaultMode);
+				}
+			} else {
+				if(context->runLoopMode != NULL) {
+					CFRunLoopAddSource(CFRunLoopGetCurrent(), notifySource, context->runLoopMode);
+				} else {
+					CFRunLoopAddSource(CFRunLoopGetCurrent(), notifySource, kCFRunLoopDefaultMode);
+				}
+			}
+		}
 	}
 	
 	return newDevice;
@@ -70,8 +95,8 @@ void iUSBRecoveryDeviceRelease(iUSBRecoveryDeviceRef device) {
 			if(device->deviceHandle) (*device->deviceHandle)->Release(device->deviceHandle);
 			if(device->interfaceHandle) (*device->interfaceHandle)->USBInterfaceClose(device->interfaceHandle);
 			if(device->interfaceHandle) (*device->interfaceHandle)->Release(device->interfaceHandle);
-			if(device->name) CFRelease(device->name);
-			if(device->serialNumber) CFRelease(device->serialNumber);
+			if(device->properties) CFRelease(device->properties);
+			if(device->disconnectNPort) IONotificationPortDestroy(device->disconnectNPort);
 		}
 		if(device->usbService) IOObjectRelease(device->usbService);
 		device->open = 0;
@@ -263,6 +288,15 @@ Boolean iUSBRecoveryDeviceIsInRecoveryMode(iUSBRecoveryDeviceRef device) {
 	return (device->idProduct == kUSBPIDRecovery ? 1 : 0);
 }
 
+void iUSBRecoveryDeviceReboot(iUSBRecoveryDeviceRef device) {
+	iUSBRecoveryDeviceSendCommand(device, CFSTR("reboot"));
+}
+
+void iUSBRecoveryDeviceSetAutoBoot(iUSBRecoveryDeviceRef device, Boolean autoBoot) {
+	iUSBRecoveryDeviceSendCommand(device, (autoBoot ? CFSTR("setenv auto-boot true") : CFSTR("setenv auto-boot false")));
+	iUSBRecoveryDeviceSendCommand(device, CFSTR("saveenv"));
+}
+
 HIDDEN int deviceGetStatus(iUSBRecoveryDeviceRef device, int flag) { 
 	if(!device->open)
 		return -1;
@@ -289,7 +323,7 @@ HIDDEN int deviceGetStatus(iUSBRecoveryDeviceRef device, int flag) {
 	return 0;
 }
 
-HIDDEN Boolean deviceOpen(iUSBRecoveryDeviceRef device) {
+HIDDEN Boolean deviceOpen(iUSBRecoveryDeviceRef device, CFMutableDictionaryRef matching) {
 	IOCFPlugInInterface **pluginInterface;
 	IOUSBDeviceInterface **deviceHandle;
 	IOUSBInterfaceInterface **interfaceHandle;
@@ -388,15 +422,33 @@ HIDDEN Boolean deviceOpen(iUSBRecoveryDeviceRef device) {
 	}
 	IOObjectRelease(iterator);
 	
-	CFStringRef productName = IORegistryEntryCreateCFProperty(service, CFSTR(kUSBProductString), kCFAllocatorDefault, 0);
-	CFStringRef productSerial = IORegistryEntryCreateCFProperty(service, CFSTR(kUSBSerialNumberString), kCFAllocatorDefault, 0);
+	CFMutableDictionaryRef properties;
+	IORegistryEntryCreateCFProperties(device->usbService, &properties, kCFAllocatorDefault, 0);
 	
 	device->deviceHandle = deviceHandle;
 	device->interfaceHandle = interfaceHandle;
 	device->open = 1;
-	device->name = productName;
-	device->serialNumber = productSerial;
+	device->properties = (CFDictionaryRef)properties;
 	device->responsePipeRef = found_interface;
+	device->disconnectNPort = IONotificationPortCreate(kIOMasterPortDefault);
+	
+	io_iterator_t detachedIterator;
+	IOServiceAddMatchingNotification(device->disconnectNPort, kIOTerminatedNotification, matching, deviceDisconnected, device, &detachedIterator);
+	deviceDisconnected(device, detachedIterator);
 	
 	return 1;
+}
+
+HIDDEN void deviceDisconnected(void *refCon, io_iterator_t iterator) {
+	iUSBRecoveryDeviceRef device = refCon;
+	io_service_t service;
+	while(service = IOIteratorNext(iterator)) {
+		IOObjectRelease(service);
+		if(device != NULL) {
+			if(device->disconnectCallback != NULL) {
+				IOObjectRelease(iterator);
+				device->disconnectCallback(device, kUSBDisconnected);
+			}
+		}
+	}
 }

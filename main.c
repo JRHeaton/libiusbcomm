@@ -10,19 +10,24 @@
 
 #include "recovery.h"
 
+void disconnect(iUSBRecoveryDeviceRef device, uint8_t newConnectionState) {
+	printf("Device disconnected...\n");
+	iUSBRecoveryDeviceRelease(device);
+}
+
 int main() {
-	iUSBRecoveryDeviceRef device = iUSBRecoveryDeviceCreateWithPID(kUSBPIDRecovery);
+	iUSBRecoveryDeviceNotificationContext context;
+	context.disconnectCallback = disconnect;
+	context.runLoop = NULL;
+	context.runLoopMode = NULL;
+	
+	iUSBRecoveryDeviceRef device = iUSBRecoveryDeviceCreate(kUSBPIDRecovery, &context);
 	if(device != NULL) {
 		printf("Sending command...\n");
-		iUSBRecoveryDeviceSendFile(device, CFSTR("/Users/John/Desktop/ibecv.dfu"), NULL);
-		iUSBRecoveryDeviceSendCommand(device, CFSTR("go"));
-		iUSBRecoveryDeviceRelease(device);
-		sleep(4);
-		device = iUSBRecoveryDeviceCreateWithPID(kUSBPIDRecovery);
-		CFStringRef response = iUSBRecoveryDeviceReadResponse(device, 1000, 1000);
-		CFShow(response);
-		if(response) CFRelease(response);
-		iUSBRecoveryDeviceRelease(device);
+		iUSBRecoveryDeviceSendCommand(device, CFSTR("setenv auto-boot false"));
+		iUSBRecoveryDeviceSendCommand(device, CFSTR("saveenv"));
+		iUSBRecoveryDeviceSendCommand(device, CFSTR("reboot"));
+		CFRunLoopRun();
 	} else {
 		printf("No device connected\n");
 	}
