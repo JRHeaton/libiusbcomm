@@ -12,8 +12,16 @@
 
 #include "recovery.h"
 
-typedef struct __iUSBListener iUSBListenerRef;
+typedef struct __iUSBListener *iUSBListenerRef;
 
-iUSBListenerRef iUSBListenerCreate();
+typedef enum {
+	kUSBListenerTypeNormal = 0x2,
+	kUSBListenerTypeRecovery = 0x4
+} iUSBListenerType;
+
+iUSBListenerRef iUSBListenerCreate(iUSBListenerType listenModes, iUSBRecoveryDeviceConnectionChangeCallback recoveryCallback);
+Boolean iUSBListenerStartListeningOnRunLoop(iUSBListenerRef listener, CFRunLoopRef runLoop, CFStringRef runLoopMode);
+void iUSBListenerStopListeningOnRunLoop(iUSBListenerRef listener, CFRunLoopRef runLoop, CFStringRef runLoopMode);
+void iUSBListenerRelease(iUSBListenerRef listener);
 
 #endif /* IUSBCOMM_LISTEN_H */

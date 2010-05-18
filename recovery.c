@@ -28,12 +28,12 @@ struct __iUSBRecoveryDevice {
 	IONotificationPortRef disconnectNPort;
 };
 
-#define RECOVERY_DEVICE_SIZE sizeof(struct __iUSBRecoveryDevice)
-#define HIDDEN __attribute__ ((visibility("hidden")))
+size_t _recoveryDeviceSize = sizeof(struct __iUSBRecoveryDevice);
 
 HIDDEN int deviceGetStatus(iUSBRecoveryDeviceRef device, int flag);
 HIDDEN Boolean deviceOpen(iUSBRecoveryDeviceRef device, CFMutableDictionaryRef matching);
 HIDDEN void deviceDisconnected(void *refCon, io_iterator_t iterator);
+HIDDEN iUSBRecoveryDeviceRef createRecoveryDevice(uint16_t pid, io_service_t service);
 
 iUSBRecoveryDeviceRef iUSBRecoveryDeviceCreate(uint16_t pid, iUSBRecoveryDeviceNotificationContext *context) {
 	CFMutableDictionaryRef matching = IOServiceMatching(kIOUSBDeviceClassName);
@@ -55,7 +55,7 @@ iUSBRecoveryDeviceRef iUSBRecoveryDeviceCreate(uint16_t pid, iUSBRecoveryDeviceN
 	if(!usbService) 
 		return NULL;
 	
-	iUSBRecoveryDeviceRef newDevice = calloc(1, RECOVERY_DEVICE_SIZE);
+	iUSBRecoveryDeviceRef newDevice = calloc(1, _recoveryDeviceSize);
 	newDevice->idProduct = pid;
 	newDevice->usbService = usbService;
 	
@@ -369,7 +369,7 @@ HIDDEN Boolean deviceOpen(iUSBRecoveryDeviceRef device, CFMutableDictionaryRef m
 		IOObjectRelease(service);
 		(*deviceHandle)->USBDeviceClose(deviceHandle);
 		(*deviceHandle)->Release(deviceHandle);
-		return -1;
+		return 0;
 	}
 	
 	io_service_t usbInterface;
@@ -432,9 +432,11 @@ HIDDEN Boolean deviceOpen(iUSBRecoveryDeviceRef device, CFMutableDictionaryRef m
 	device->responsePipeRef = found_interface;
 	device->disconnectNPort = IONotificationPortCreate(kIOMasterPortDefault);
 	
-	io_iterator_t detachedIterator;
-	IOServiceAddMatchingNotification(device->disconnectNPort, kIOTerminatedNotification, matching, deviceDisconnected, device, &detachedIterator);
-	deviceDisconnected(device, detachedIterator);
+	if(matching) {
+		io_iterator_t detachedIterator;
+		IOServiceAddMatchingNotification(device->disconnectNPort, kIOTerminatedNotification, matching, deviceDisconnected, device, &detachedIterator);
+		deviceDisconnected(device, detachedIterator);
+	}
 	
 	return 1;
 }
@@ -451,4 +453,12 @@ HIDDEN void deviceDisconnected(void *refCon, io_iterator_t iterator) {
 			}
 		}
 	}
+}
+
+HIDDEN iUSBRecoveryDeviceRef createRecoveryDevice(uint16_t pid, io_service_t service) {
+	iUSBRecoveryDeviceRef newDevice = calloc(1, _recoveryDeviceSize);
+	newDevice->idProduct = pid;
+	newDevice->usbService = service;
+	
+	return newDevice;
 }

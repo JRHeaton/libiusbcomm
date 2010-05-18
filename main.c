@@ -8,29 +8,39 @@
  */
 
 
-#include "recovery.h"
+#include "listen.h"
 
-void disconnect(iUSBRecoveryDeviceRef device, uint8_t newConnectionState) {
-	printf("Device disconnected...\n");
-	iUSBRecoveryDeviceRelease(device);
+int color = 0;
+
+void connection(iUSBRecoveryDeviceRef device, uint8_t newConnectionState) {
+	if(newConnectionState == kUSBConnected) {
+		printf("Connected\n");
+		if(color == 0) {
+			color = 1;
+			iUSBRecoveryDeviceSendCommand(device, CFSTR("bgcolor 255 0 0"));
+		} else {
+			color = 0;
+			iUSBRecoveryDeviceSendCommand(device, CFSTR("bgcolor 0 0 255"));
+		}
+	} else {
+		printf("Disconnected\n");
+		iUSBRecoveryDeviceRelease(device);
+	}
 }
 
 int main() {
-	iUSBRecoveryDeviceNotificationContext context;
-	context.disconnectCallback = disconnect;
-	context.runLoop = NULL;
-	context.runLoopMode = NULL;
 	
-	iUSBRecoveryDeviceRef device = iUSBRecoveryDeviceCreate(kUSBPIDRecovery, &context);
-	if(device != NULL) {
-		printf("Sending command...\n");
-		iUSBRecoveryDeviceSendCommand(device, CFSTR("setenv auto-boot false"));
-		iUSBRecoveryDeviceSendCommand(device, CFSTR("saveenv"));
-		iUSBRecoveryDeviceSendCommand(device, CFSTR("reboot"));
-		CFRunLoopRun();
-	} else {
-		printf("No device connected\n");
+	iUSBListenerRef listener = iUSBListenerCreate(kUSBListenerTypeRecovery, connection);
+	if(listener != NULL) {
+		if(!iUSBListenerStartListeningOnRunLoop(listener, NULL, NULL)) {
+			printf("Failed to start listening\n");
+			iUSBListenerRelease(listener);
+		} else {
+			printf("Listening...\n");
+		}
 	}
+	
+	CFRunLoopRun();
 	
 	return 0;
 }

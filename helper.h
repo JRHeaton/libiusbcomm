@@ -21,4 +21,6 @@ enum iUSBRequest {
 CFNumberRef AppleIncVendorID();
 CFNumberRef numberForUInt16(uint16_t value);
 
+#define HIDDEN __attribute__ ((visibility("hidden")))
+
 #endif /* IUSBCOMM_HELPER_H */
